@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sohum Dashboard</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#14b8a6',
+            secondary: '#f3f4f6'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+  <script type="text/javascript">
+    const { useState, useEffect, createElement: h } = React;
+    const { createRoot } = ReactDOM;
+
+    // Configuration
+    const MASTER_SHEET_ID = '16evdSZDgIx7DkP3X7rxzkT8p8YtXsLykdIPXeIXhxxM';
+    const ADMIN_SHEET_ID = '1w7cKakdDSpAfzNiqHYzjM4qiY_7j14eIBWR4lQlkqDk';
+    const LOG_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyYGN_tvRRadnWNM6Osrpcx4tq4HoibvJCLUEEPcbOx5IBoRw7JCWCqe3N3KLZ7GLmu/exec';
+
+    const MASTER_GIDS = {
+      healthcareWorkers: '1307397658',
+      hospitals: '1533063125',
+      devices: '1397829803'
+    };
+
+    // Data Fetching Functions
+    const fetchSheetData = async (sheetId, gid) => {
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
+      try {
+        const response = await fetch(url);
+        const text = await response.text();
+        const jsonText = text.substring(47, text.length - 2);
+        const data = JSON.parse(jsonText);
+        return data.table.rows.map(row => row.c.map(cell => cell ? cell.v : ''));
+      } catch (error) {
+        console.error('Error fetching sheet:', error);
+        throw error;
+      }
+    };
+
+    const fetchLogData = async () => {
+      try {
+        const response = await fetch(`${LOG_SCRIPT_URL}?action=getAll`);
+        const data = await response.json();
+        return data.data || [];
+      } catch (error) {
+        console.error('Error fetching log data:', error);
+        throw error;
+      }
+    };
+
+    const fetchAllData = async () => {
+      const [healthcareWorkers, hospitals, devices, adminCreds, logData] = await Promise.all([
+        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.healthcareWorkers),
+        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.hospitals),
+        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.devices),
+        fetchSheetData(ADMIN_SHEET_ID, '0'), // Approved Credentials is first sheet
+        fetchLogData()
+      ]);
+
+      return {
+        healthcareWorkers: healthcareWorkers.slice(1), // Skip header
+        hospitals: hospitals.slice(1),
+        devices: devices.slice(1),
+        adminCreds: adminCreds.slice(1),
+        logData: logData.slice(1) // Skip header if present
+      };
+    };
+
+    // UI Components
+    const Card = ({ children, onClick, className = '' }) =>
+      h('div', {
+        className: `bg-white rounded-2xl shadow-sm p-6 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''} ${className}`,
+        onClick
+      }, children);
+
+    const Button = ({ children, onClick, variant = 'primary', disabled = false, className = '' }) =>
+      h('button', {
+        onClick,
+        disabled,
+        className: `w-full py-3.5 px-6 rounded-xl font-medium transition-all ${
+          variant === 'primary'
+            ? 'bg-primary text-white hover:bg-primary/90 disabled:bg-gray-300'
+            : 'bg-secondary text-gray-700 hover:bg-gray-300'
+        } ${disabled ? 'cursor-not-allowed' : 'active:scale-95'} ${className}`
+      }, children);
+
+    const Input = ({ label, error, ...props }) =>
+      h('div', { className: 'space-y-2' },
+        label && h('label', { className: 'text-sm font-medium text-gray-700 ml-1 block' }, label),
+        h('input', {
+          ...props,
+          className: `w-full bg-secondary border-none rounded-xl px-4 py-3.5 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 ${props.className || ''}`
+        }),
+        error && h('span', { className: 'text-xs text-red-500 ml-1' }, error)
+      );
+
+    const Header = ({ title, subtitle, onBack, onLogout }) =>
+      h('div', { className: 'bg-gradient-to-r from-primary to-teal-600 text-white p-6 shadow-lg' },
+        h('div', { className: 'max-w-[480px] mx-auto' },
+          h('div', { className: 'flex items-center justify-between mb-2' },
+            onBack && h('button', {
+              onClick: onBack,
+              className: 'p-2 hover:bg-white/10 rounded-lg transition-colors'
+            },
+              h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round' },
+                h('path', { d: 'M19 12H5' }),
+                h('path', { d: 'M12 19l-7-7 7-7' })
+              )
+            ),
+            !onBack && h('div'),
+            onLogout && h('button', {
+              onClick: onLogout,
+              className: 'text-sm px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors'
+            }, 'Logout')
+          ),
+          h('h1', { className: 'text-2xl font-bold' }, title),
+          subtitle && h('p', { className: 'text-teal-100 text-sm mt-1' }, subtitle)
+        )
+      );
+
+    const Container = ({ children, className = '' }) =>
+      h('div', { className: `max-w-[480px] mx-auto p-4 space-y-4 ${className}` }, children);
+
+    const VersionWatermark = () =>
+      h('div', { 
+        className: 'fixed bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded-full z-50 font-mono'
+      }, 'Dashboard v1.0');
+
+    // Login Screen
+    const LoginScreen = ({ onLogin }) => {
+      const [form, setForm] = useState({ username: '', password: '' });
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const handleLogin = async () => {
+        setError('');
+        setLoading(true);
+
+        try {
+          const data = await fetchAllData();
+          
+          // Validate credentials
+          const admin = data.adminCreds.find(
+            row => row[0] === form.username && row[1] === form.password
+          );
+
+          if (admin) {
+            onLogin({
+              username: admin[0],
+              name: admin[2] || 'Admin',
+              allData: data
+            });
+          } else {
+            setError('Invalid username or password');
+            setLoading(false);
+          }
+        } catch (err) {
+          setError('Failed to load data. Please check your connection.');
+          setLoading(false);
+        }
+      };
+
+      return h('div', { className: 'min-h-screen flex flex-col' },
+        h(Header, { title: 'Sohum Dashboard', subtitle: 'Admin Login' }),
+        h(Container, { className: 'flex-1 justify-center' },
+          h(Card, {},
+            h('div', { className: 'space-y-4' },
+              h(Input, {
+                label: 'Username',
+                value: form.username,
+                onChange: (e) => setForm({ ...form, username: e.target.value }),
+                placeholder: 'Enter username',
+                autoCapitalize: 'none',
+                autoCorrect: 'off'
+              }),
+              h(Input, {
+                label: 'Password',
+                type: 'password',
+                value: form.password,
+                onChange: (e) => setForm({ ...form, password: e.target.value }),
+                placeholder: 'Enter password',
+                onKeyPress: (e) => {
+                  if (e.key === 'Enter' && form.username && form.password) {
+                    handleLogin();
+                  }
+                }
+              }),
+              error && h('div', { className: 'text-sm text-red-500 text-center' }, error),
+              h(Button, {
+                onClick: handleLogin,
+                disabled: !form.username || !form.password || loading
+              }, loading ? 'Loading...' : 'Login')
+            )
+          )
+        ),
+        h(VersionWatermark)
+      );
+    };
+	// Main Menu Screen
+    const MainMenuScreen = ({ admin, onLogout, onSelectView }) =>
+      h('div', { className: 'min-h-screen flex flex-col' },
+        h(Header, { 
+          title: 'Dashboard', 
+          subtitle: `Welcome, ${admin.name}`,
+          onLogout 
+        }),
+        h(Container, {},
+          h('div', { className: 'space-y-4' },
+            h(Card, { onClick: () => onSelectView('device') },
+              h('div', { className: 'flex items-center gap-4' },
+                h('div', { className: 'w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0' },
+                  h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: 'text-primary' },
+                    h('rect', { x: '2', y: '7', width: '20', height: '14', rx: '2', ry: '2' }),
+                    h('path', { d: 'M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16' })
+                  )
+                ),
+                h('div', { className: 'flex-1' },
+                  h('h3', { className: 'font-semibold text-lg text-gray-800' }, 'View by Device'),
+                  h('p', { className: 'text-sm text-gray-500 mt-1' }, 'Statistics per screening device')
+                )
+              )
+            ),
+            h(Card, { onClick: () => onSelectView('hospital') },
+              h('div', { className: 'flex items-center gap-4' },
+                h('div', { className: 'w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0' },
+                  h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: 'text-primary' },
+                    h('path', { d: 'M12 2v20M2 12h20M17 2L7 12l10 10M7 2l10 10L7 22' })
+                  )
+                ),
+                h('div', { className: 'flex-1' },
+                  h('h3', { className: 'font-semibold text-lg text-gray-800' }, 'View by Hospital'),
+                  h('p', { className: 'text-sm text-gray-500 mt-1' }, 'Statistics per hospital location')
+                )
+              )
+            ),
+            h(Card, { onClick: () => onSelectView('ngo') },
+              h('div', { className: 'flex items-center gap-4' },
+                h('div', { className: 'w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0' },
+                  h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: 'text-primary' },
+                    h('path', { d: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' }),
+                    h('circle', { cx: '9', cy: '7', r: '4' }),
+                    h('path', { d: 'M23 21v-2a4 4 0 0 0-3-3.87' }),
+                    h('path', { d: 'M16 3.13a4 4 0 0 1 0 7.75' })
+                  )
+                ),
+                h('div', { className: 'flex-1' },
+                  h('h3', { className: 'font-semibold text-lg text-gray-800' }, 'View by NGO'),
+                  h('p', { className: 'text-sm text-gray-500 mt-1' }, 'Statistics per organization')
+                )
+              )
+            ),
+            h(Card, { onClick: () => onSelectView('worker') },
+              h('div', { className: 'flex items-center gap-4' },
+                h('div', { className: 'w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0' },
+                  h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: 'text-primary' },
+                    h('path', { d: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2' }),
+                    h('circle', { cx: '9', cy: '7', r: '4' }),
+                    h('line', { x1: '19', x2: '19', y1: '8', y2: '14' }),
+                    h('line', { x1: '22', x2: '16', y1: '11', y2: '11' })
+                  )
+                ),
+                h('div', { className: 'flex-1' },
+                  h('h3', { className: 'font-semibold text-lg text-gray-800' }, 'View by Healthcare Worker'),
+                  h('p', { className: 'text-sm text-gray-500 mt-1' }, 'Statistics per operator')
+                )
+              )
+            )
+          )
+        ),
+        h(VersionWatermark)
+      );
+
+    // Selection Screen (for choosing specific entity)
+    const SelectionScreen = ({ viewType, admin, onBack, onSelect }) => {
+      const [selected, setSelected] = useState('');
+
+      const getOptions = () => {
+        const { logData, hospitals, devices, healthcareWorkers } = admin.allData;
+        
+        switch(viewType) {
+          case 'device':
+            // Get unique devices from log data
+            return [...new Set(logData.map(row => row[5]).filter(d => d))].sort();
+          
+          case 'hospital':
+            // Get unique hospitals from log data
+            return [...new Set(logData.map(row => row[4]).filter(h => h))].sort();
+          
+          case 'ngo':
+            // Get unique NGOs from log data
+            return [...new Set(logData.map(row => row[3]).filter(n => n))].sort();
+          
+          case 'worker':
+            // Get unique workers from log data (using Operator ID)
+            const workerIds = [...new Set(logData.map(row => row[2]).filter(w => w))];
+            return workerIds.map(id => {
+              const worker = healthcareWorkers.find(w => w[0] === id);
+              return {
+                id,
+                name: worker ? worker[2] : id
+              };
+            }).sort((a, b) => a.name.localeCompare(b.name));
+          
+          default:
+            return [];
+        }
+      };
+
+      const options = getOptions();
+      const titles = {
+        device: 'Select Device',
+        hospital: 'Select Hospital',
+        ngo: 'Select NGO',
+        worker: 'Select Healthcare Worker'
+      };
+
+      return h('div', { className: 'min-h-screen flex flex-col pb-24' },
+        h(Header, { 
+          title: titles[viewType],
+          subtitle: 'Choose an option to view statistics',
+          onBack 
+        }),
+        h(Container, {},
+          h(Card, {},
+            h('div', { className: 'space-y-4' },
+              h('label', { className: 'text-sm font-medium text-gray-700 ml-1 block' }, 
+                viewType === 'worker' ? 'Healthcare Worker' : titles[viewType].replace('Select ', '')
+              ),
+              h('select', {
+                value: selected,
+                onChange: (e) => setSelected(e.target.value),
+                className: 'w-full bg-secondary border-none rounded-xl px-4 py-3.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary/20'
+              },
+                h('option', { value: '' }, 'Choose...'),
+                options.map((opt, i) => {
+                  const value = typeof opt === 'string' ? opt : opt.id;
+                  const label = typeof opt === 'string' ? opt : `${opt.name} (${opt.id})`;
+                  return h('option', { key: i, value }, label);
+                })
+              )
+            )
+          )
+        ),
+        h('div', { className: 'fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg' },
+          h('div', { className: 'max-w-[480px] mx-auto' },
+            h(Button, {
+              onClick: () => onSelect(selected),
+              disabled: !selected
+            }, 'View Statistics')
+          )
+        ),
+        h(VersionWatermark)
+      );
+    };
+	// Statistics Calculation Function
+    const calculateStats = (logData, filterType, filterValue) => {
+      // Filter data based on selection
+      let filtered = logData;
+      
+      switch(filterType) {
+        case 'device':
+          filtered = logData.filter(row => row[5] === filterValue); // Column F: Device Serial
+          break;
+        case 'hospital':
+          filtered = logData.filter(row => row[4] === filterValue); // Column E: Hospital
+          break;
+        case 'ngo':
+          filtered = logData.filter(row => row[3] === filterValue); // Column D: NGO
+          break;
+        case 'worker':
+          filtered = logData.filter(row => row[2] === filterValue); // Column C: Operator ID
+          break;
+      }
+
+      if (filtered.length === 0) {
+        return null;
+      }
+
+      // Basic counts
+      const totalScreenings = filtered.length;
+      const uniqueBabies = new Set(filtered.map(row => row[7])).size; // Column H: Screening ID (proxy for baby)
+      
+      // Date range
+      const dates = filtered.map(row => new Date(row[0])).filter(d => !isNaN(d));
+      const firstDate = dates.length > 0 ? new Date(Math.min(...dates)) : null;
+      const lastDate = dates.length > 0 ? new Date(Math.max(...dates)) : null;
+
+      // Test type breakdown
+      const aabrTests = filtered.filter(row => row[17] === 'AABR'); // Column R: Test Type
+      const oaeTests = filtered.filter(row => row[17] === 'OAE');
+
+      // AABR Pass/Refer calculation
+      const aabrResults = aabrTests.map(row => {
+        // Check all dB levels (columns 19-22: left, 23-26: right)
+        const leftResults = [row[18], row[19], row[20], row[21]].filter(r => r);
+        const rightResults = [row[22], row[23], row[24], row[25]].filter(r => r);
+        const allResults = [...leftResults, ...rightResults];
+        
+        if (allResults.some(r => r === 'PASS')) return 'PASS';
+        if (allResults.some(r => r === 'REFER')) return 'REFER';
+        return 'UNKNOWN';
+      });
+
+      const aabrPass = aabrResults.filter(r => r === 'PASS').length;
+      const aabrRefer = aabrResults.filter(r => r === 'REFER').length;
+      const aabrTotal = aabrTests.length;
+
+      // OAE Pass/Refer calculation
+      const oaeResults = oaeTests.map(row => {
+        const leftResult = row[27]; // Column AB: OAE Left Result
+        const rightResult = row[28]; // Column AC: OAE Right Result
+        
+        if (leftResult === 'PASS' || rightResult === 'PASS') return 'PASS';
+        if (leftResult === 'REFER' || rightResult === 'REFER') return 'REFER';
+        return 'UNKNOWN';
+      });
+
+      const oaePass = oaeResults.filter(r => r === 'PASS').length;
+      const oaeRefer = oaeResults.filter(r => r === 'REFER').length;
+      const oaeTotal = oaeTests.length;
+
+      // Risk factors analysis
+      const riskFactorOptions = [
+        "NICU > 5 days",
+        "Family history of hearing loss",
+        "Craniofacial anomalies",
+        "In utero infections",
+        "Hyperbilirubinemia",
+        "Syndromes associated with hearing loss"
+      ];
+
+      const riskFactorCounts = {};
+      filtered.forEach(row => {
+        const riskFactors = row[16] || ''; // Column Q: Risk Factors
+        riskFactorOptions.forEach(rf => {
+          if (riskFactors.includes(rf)) {
+            riskFactorCounts[rf] = (riskFactorCounts[rf] || 0) + 1;
+          }
+        });
+      });
+
+      const topRiskFactors = Object.entries(riskFactorCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+
+      return {
+        totalScreenings,
+        uniqueBabies,
+        firstDate,
+        lastDate,
+        aabrCount: aabrTotal,
+        oaeCount: oaeTotal,
+        aabrPass,
+        aabrRefer,
+        aabrPassPercent: aabrTotal > 0 ? Math.round((aabrPass / aabrTotal) * 100) : 0,
+        aabrReferPercent: aabrTotal > 0 ? Math.round((aabrRefer / aabrTotal) * 100) : 0,
+        oaePass,
+        oaeRefer,
+        oaePassPercent: oaeTotal > 0 ? Math.round((oaePass / oaeTotal) * 100) : 0,
+        oaeReferPercent: oaeTotal > 0 ? Math.round((oaeRefer / oaeTotal) * 100) : 0,
+        topRiskFactors
+      };
+    };
+
+    // Statistics Dashboard Screen
+    const StatsDashboardScreen = ({ viewType, selectedValue, admin, onBack }) => {
+      const [stats, setStats] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        const calcStats = calculateStats(admin.allData.logData, viewType, selectedValue);
+        setStats(calcStats);
+        setLoading(false);
+      }, [viewType, selectedValue]);
+
+      if (loading) {
+        return h('div', { className: 'min-h-screen flex items-center justify-center' },
+          h('div', { className: 'text-xl text-gray-600' }, 'Calculating statistics...')
+        );
+      }
+
+      if (!stats) {
+        return h('div', { className: 'min-h-screen flex flex-col' },
+          h(Header, { title: 'No Data', onBack }),
+          h(Container, {},
+            h(Card, {},
+              h('p', { className: 'text-center text-gray-600' }, 'No screening data found for this selection.')
+            )
+          )
+        );
+      }
+
+      const formatDate = (date) => {
+        if (!date) return 'N/A';
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      };
+
+      const titles = {
+        device: 'Device',
+        hospital: 'Hospital',
+        ngo: 'NGO',
+        worker: 'Healthcare Worker'
+      };
+
+      return h('div', { className: 'min-h-screen flex flex-col pb-6' },
+        h(Header, { 
+          title: `${titles[viewType]} Statistics`,
+          subtitle: selectedValue,
+          onBack 
+        }),
+        h(Container, {},
+          // Summary Cards
+          h('div', { className: 'grid grid-cols-3 gap-3' },
+            h(Card, {},
+              h('div', { className: 'text-center' },
+                h('div', { className: 'text-3xl font-bold text-primary' }, stats.uniqueBabies),
+                h('div', { className: 'text-xs text-gray-500 mt-1' }, 'Babies Tested')
+              )
+            ),
+            h(Card, {},
+              h('div', { className: 'text-center' },
+                h('div', { className: 'text-3xl font-bold text-primary' }, stats.totalScreenings),
+                h('div', { className: 'text-xs text-gray-500 mt-1' }, 'Total Screenings')
+              )
+            ),
+            h(Card, {},
+              h('div', { className: 'text-center' },
+                h('div', { className: 'text-xs text-gray-600 font-medium' }, formatDate(stats.firstDate)),
+                h('div', { className: 'text-xs text-gray-400' }, 'to'),
+                h('div', { className: 'text-xs text-gray-600 font-medium' }, formatDate(stats.lastDate))
+              )
+            )
+          ),
+
+          // Test Distribution
+          h(Card, {},
+            h('div', { className: 'space-y-3' },
+              h('h3', { className: 'font-semibold text-gray-800' }, 'Test Distribution'),
+              h('div', { className: 'space-y-2' },
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'AABR'),
+                    h('span', { className: 'font-medium text-gray-800' }, 
+                      `${stats.aabrCount} (${stats.totalScreenings > 0 ? Math.round((stats.aabrCount / stats.totalScreenings) * 100) : 0}%)`
+                    )
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-primary h-2 rounded-full transition-all',
+                      style: { width: `${stats.totalScreenings > 0 ? (stats.aabrCount / stats.totalScreenings) * 100 : 0}%` }
+                    })
+                  )
+                ),
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'OAE'),
+                    h('span', { className: 'font-medium text-gray-800' }, 
+                      `${stats.oaeCount} (${stats.totalScreenings > 0 ? Math.round((stats.oaeCount / stats.totalScreenings) * 100) : 0}%)`
+                    )
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-teal-400 h-2 rounded-full transition-all',
+                      style: { width: `${stats.totalScreenings > 0 ? (stats.oaeCount / stats.totalScreenings) * 100 : 0}%` }
+                    })
+                  )
+                )
+              )
+            )
+          ),
+
+          // AABR Pass/Refer Rates
+          stats.aabrCount > 0 && h(Card, {},
+            h('div', { className: 'space-y-3' },
+              h('h3', { className: 'font-semibold text-gray-800' }, 'AABR Results'),
+              h('div', { className: 'space-y-2' },
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'Pass'),
+                    h('span', { className: 'font-medium text-green-600' }, `${stats.aabrPassPercent}%`)
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-green-500 h-2 rounded-full transition-all',
+                      style: { width: `${stats.aabrPassPercent}%` }
+                    })
+                  )
+                ),
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'Refer'),
+                    h('span', { className: 'font-medium text-orange-600' }, `${stats.aabrReferPercent}%`)
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-orange-500 h-2 rounded-full transition-all',
+                      style: { width: `${stats.aabrReferPercent}%` }
+                    })
+                  )
+                )
+              )
+            )
+          ),
+
+          // OAE Pass/Refer Rates
+          stats.oaeCount > 0 && h(Card, {},
+            h('div', { className: 'space-y-3' },
+              h('h3', { className: 'font-semibold text-gray-800' }, 'OAE Results'),
+              h('div', { className: 'space-y-2' },
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'Pass'),
+                    h('span', { className: 'font-medium text-green-600' }, `${stats.oaePassPercent}%`)
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-green-500 h-2 rounded-full transition-all',
+                      style: { width: `${stats.oaePassPercent}%` }
+                    })
+                  )
+                ),
+                h('div', {},
+                  h('div', { className: 'flex justify-between text-sm mb-1' },
+                    h('span', { className: 'text-gray-700' }, 'Refer'),
+                    h('span', { className: 'font-medium text-orange-600' }, `${stats.oaeReferPercent}%`)
+                  ),
+                  h('div', { className: 'w-full bg-gray-200 rounded-full h-2' },
+                    h('div', {
+                      className: 'bg-orange-500 h-2 rounded-full transition-all',
+                      style: { width: `${stats.oaeReferPercent}%` }
+                    })
+                  )
+                )
+              )
+            )
+          ),
+
+          // Risk Factors
+          stats.topRiskFactors.length > 0 && h(Card, {},
+            h('div', { className: 'space-y-3' },
+              h('h3', { className: 'font-semibold text-gray-800' }, 'Top Risk Factors'),
+              h('ul', { className: 'space-y-2' },
+                stats.topRiskFactors.map(([factor, count], i) =>
+                  h('li', { key: i, className: 'flex justify-between text-sm' },
+                    h('span', { className: 'text-gray-700' }, `${i + 1}. ${factor}`),
+                    h('span', { className: 'font-medium text-gray-800' }, `${count} babies`)
+                  )
+                )
+              )
+            )
+          )
+        ),
+        h(VersionWatermark)
+      );
+    };
+
+    // Main App
+    const STEP = {
+      LOGIN: 'LOGIN',
+      MENU: 'MENU',
+      SELECT: 'SELECT',
+      STATS: 'STATS'
+    };
+
+    const App = () => {
+      const [step, setStep] = useState(STEP.LOGIN);
+      const [admin, setAdmin] = useState(null);
+      const [viewType, setViewType] = useState(null);
+      const [selectedValue, setSelectedValue] = useState(null);
+
+      const handleLogin = (adminData) => {
+        setAdmin(adminData);
+        setStep(STEP.MENU);
+      };
+
+      const handleLogout = () => {
+        setAdmin(null);
+        setViewType(null);
+        setSelectedValue(null);
+        setStep(STEP.LOGIN);
+      };
+
+      const handleSelectView = (type) => {
+        setViewType(type);
+        setStep(STEP.SELECT);
+      };
+
+      const handleSelect = (value) => {
+        setSelectedValue(value);
+        setStep(STEP.STATS);
+      };
+
+      const handleBackToMenu = () => {
+        setViewType(null);
+        setSelectedValue(null);
+        setStep(STEP.MENU);
+      };
+
+      const handleBackToSelect = () => {
+        setSelectedValue(null);
+        setStep(STEP.SELECT);
+      };
+
+      return h('div', {},
+        step === STEP.LOGIN && h(LoginScreen, { onLogin: handleLogin }),
+        step === STEP.MENU && h(MainMenuScreen, { 
+          admin, 
+          onLogout: handleLogout,
+          onSelectView: handleSelectView 
+        }),
+        step === STEP.SELECT && h(SelectionScreen, {
+          viewType,
+          admin,
+          onBack: handleBackToMenu,
+          onSelect: handleSelect
+        }),
+        step === STEP.STATS && h(StatsDashboardScreen, {
+          viewType,
+          selectedValue,
+          admin,
+          onBack: handleBackToSelect
+        })
+      );
+    };
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(h(App));
+  </script>
+</body>
+</html>
