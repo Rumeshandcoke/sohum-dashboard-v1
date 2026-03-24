@@ -43,39 +43,70 @@
     };
 
     // Data Fetching Functions
-    const fetchSheetData = async (sheetId, gid) => {
+    const fetchSheetData = async (sheetId, gid, label) => {
       const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
       try {
         const response = await fetch(url);
         const text = await response.text();
-        const jsonText = text.substring(47, text.length - 2);
+
+        // Google wraps the JSON in a callback — find the actual JSON boundaries
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start === -1 || end === -1) {
+          throw new Error(`Sheet "${label}" returned an unexpected response. Ensure it is published to the web (File > Share > Publish to web).`);
+        }
+        const jsonText = text.substring(start, end + 1);
         const data = JSON.parse(jsonText);
-        return data.table.rows.map(row => row.c.map(cell => cell ? cell.v : ''));
+
+        if (!data.table || !data.table.rows) {
+          throw new Error(`Sheet "${label}" returned no table data. It may not be published or the GID may be incorrect.`);
+        }
+
+        return data.table.rows.map(row => row.c.map(cell => (cell ? cell.v : '')));
       } catch (error) {
-        console.error('Error fetching sheet:', error);
-        throw error;
+        console.error(`Error fetching sheet "${label}":`, error);
+        throw new Error(error.message || `Failed to load sheet: ${label}`);
       }
     };
 
     const fetchLogData = async () => {
       try {
         const response = await fetch(`${LOG_SCRIPT_URL}?action=getAll`);
+        if (!response.ok) {
+          throw new Error(`Screening log endpoint returned status ${response.status}.`);
+        }
         const data = await response.json();
         return data.data || [];
       } catch (error) {
         console.error('Error fetching log data:', error);
-        throw error;
+        throw new Error(error.message || 'Failed to load screening log data.');
       }
     };
 
     const fetchAllData = async () => {
-      const [healthcareWorkers, hospitals, devices, adminCreds, logData] = await Promise.all([
-        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.healthcareWorkers),
-        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.hospitals),
-        fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.devices),
-        fetchSheetData(ADMIN_SHEET_ID, '0'), // Approved Credentials is first sheet
-        fetchLogData()
-      ]);
+      let healthcareWorkers, hospitals, devices, adminCreds, logData;
+
+      try {
+        adminCreds = await fetchSheetData(ADMIN_SHEET_ID, '0', 'Admin Credentials');
+      } catch (err) {
+        throw new Error(`Could not load admin credentials. ${err.message}`);
+      }
+
+      try {
+        [healthcareWorkers, hospitals, devices] = await Promise.all([
+          fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.healthcareWorkers, 'Healthcare Workers'),
+          fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.hospitals, 'Hospitals'),
+          fetchSheetData(MASTER_SHEET_ID, MASTER_GIDS.devices, 'Devices'),
+        ]);
+      } catch (err) {
+        throw new Error(`Could not load master data. ${err.message}`);
+      }
+
+      try {
+        logData = await fetchLogData();
+      } catch (err) {
+        throw new Error(`Could not load screening log. ${err.message}`);
+      }
 
       return {
         healthcareWorkers: healthcareWorkers.slice(1), // Skip header
@@ -175,7 +206,7 @@
             setLoading(false);
           }
         } catch (err) {
-          setError('Failed to load data. Please check your connection.');
+          setError(err.message || 'Failed to load data. Please check your connection.');
           setLoading(false);
         }
       };
